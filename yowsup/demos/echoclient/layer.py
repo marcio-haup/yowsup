@@ -112,7 +112,11 @@ class EchoLayer(YowInterfaceLayer):
             setBy = notification.getSubjectOwner()
         except AttributeError:
             setBy = ''
-        titulo = notification.getSubject()
+	
+	try:
+            titulo = notification.getSubject()
+	except AttributeError:
+            titulo = ''
 
         url = "http://localhost/robert/index.php"
         params = dict(
