@@ -24,6 +24,9 @@ from yowsup.common.optionalmodules import PILOptionalModule, AxolotlOptionalModu
 
 class EchoLayer(YowInterfaceLayer):
 
+    FAIL_OPT_PILLOW         = "No PIL library installed, try install pillow"
+    FAIL_OPT_AXOLOTL        = "axolotl is not installed, try install python-axolotl"
+
     def __init__(self):
         # super(YowsupCliLayer, self).__init__()
         YowInterfaceLayer.__init__(self)
@@ -105,27 +108,46 @@ class EchoLayer(YowInterfaceLayer):
     def onNotification(self, notification):
         notificationData = notification.__str__()
 
-        participante = notification.getParticipant()
-        alvo = notification.getFrom()
-        tipo = notification.getType()
+        try:
+            participante = notification.getParticipant()
+        except AttributeError:
+            participante = ''
+
+        try:
+            tipo = notification.getType()
+        except AttributeError:
+            tipo = ''
+
+        try:
+            alvo = notification.getFrom()
+        except AttributeError:
+            alvo = ''
+        
         try:
             setBy = notification.getSubjectOwner()
         except AttributeError:
             setBy = ''
-	
-	try:
+
+        try:
             titulo = notification.getSubject()
-	except AttributeError:
+        except AttributeError:
             titulo = ''
+
+        try:
+            notify = notification.getNotify()
+        except AttributeError:
+            notify = ''
 
         url = "http://localhost/robert/index.php"
         params = dict(
             acao='notificacao',
+            classType=type(notification),
             tipo=tipo,
             alvo=alvo,
             participante=participante,
             alteradoPor=setBy,
-            titulo=titulo
+            titulo=titulo,
+            notify=notify,
         )
         resp = requests.get(url=url, params=params)
         data = json.loads(resp.text)
@@ -148,3 +170,73 @@ class EchoLayer(YowInterfaceLayer):
                     print "trocarNomeGrupo para %s" % retorno['nome']
                     entity = SubjectGroupsIqProtocolEntity(self.aliasToJid(retorno['grupoId']), retorno['nome'])
                     self.toLower(entity)
+
+                if retorno['acao'] == 'trocarImagemGrupo':
+                    print "trocarImagemGrupo para %s" % retorno['path']
+                    self.group_picture(retorno['grupoId'], retorno['path'])
+
+                if retorno['acao'] == 'removerParticipante':
+                    print "removerParticipante %s do grupo %s" % (retorno['participante'], retorno['grupoId'])
+                    entity = RemoveParticipantsIqProtocolEntity(self.aliasToJid(retorno['grupoId']), [self.aliasToJid(retorno['participante'])])
+                    self.toLower(entity)
+
+    def group_picture(self, group_jid, path):
+        with PILOptionalModule(failMessage = self.__class__.FAIL_OPT_PILLOW) as imp:
+            Image = imp("Image")
+
+            def onSuccess(resultIqEntity, originalIqEntity):
+                print "Group picture updated successfully"
+
+            def onError(errorIqEntity, originalIqEntity):
+                print "Error updating Group picture"
+
+            #example by @aesedepece in https://github.com/tgalal/yowsup/pull/781
+            #modified to support python3
+            src = Image.open(path)
+            pictureData = src.resize((640, 640)).tobytes("jpeg", "RGB")
+            picturePreview = src.resize((96, 96)).tobytes("jpeg", "RGB")
+            iq = SetPictureIqProtocolEntity(self.aliasToJid(group_jid), picturePreview, pictureData)
+            self._sendIq(iq, onSuccess, onError)
+
+    def media_send(self, number, path, mediaType, caption = None):
+        jid = self.aliasToJid(number)
+        entity = RequestUploadIqProtocolEntity(mediaType, filePath=path)
+        successFn = lambda successEntity, originalEntity: self.onRequestUploadResult(jid, mediaType, path, successEntity, originalEntity, caption)
+        errorFn = lambda errorEntity, originalEntity: self.onRequestUploadError(jid, path, errorEntity, originalEntity)
+        self._sendIq(entity, successFn, errorFn)
+
+        self._sendIq(entity, successFn, errorFn)
+
+    def doSendMedia(self, mediaType, filePath, url, to, ip = None, caption = None):
+        if mediaType == RequestUploadIqProtocolEntity.MEDIA_TYPE_IMAGE:
+            entity = ImageDownloadableMediaMessageProtocolEntity.fromFilePath(filePath, url, ip, to, caption = caption)
+        elif mediaType == RequestUploadIqProtocolEntity.MEDIA_TYPE_AUDIO:
+            entity = AudioDownloadableMediaMessageProtocolEntity.fromFilePath(filePath, url, ip, to)
+        elif mediaType == RequestUploadIqProtocolEntity.MEDIA_TYPE_VIDEO:
+            entity = VideoDownloadableMediaMessageProtocolEntity.fromFilePath(filePath, url, ip, to, caption = caption)
+        self.toLower(entity)
+
+    def __str__(self):
+        return "CLI Interface Layer"
+
+    ########### callbacks ############
+
+    def onRequestUploadResult(self, jid, mediaType, filePath, resultRequestUploadIqProtocolEntity, requestUploadIqProtocolEntity, caption = None):
+
+        if resultRequestUploadIqProtocolEntity.isDuplicate():
+            self.doSendMedia(mediaType, filePath, resultRequestUploadIqProtocolEntity.getUrl(), jid,
+                             resultRequestUploadIqProtocolEntity.getIp(), caption)
+        else:
+            successFn = lambda filePath, jid, url: self.doSendMedia(mediaType, filePath, url, jid, resultRequestUploadIqProtocolEntity.getIp(), caption)
+            mediaUploader = MediaUploader(jid, self.getOwnJid(), filePath,
+                                      resultRequestUploadIqProtocolEntity.getUrl(),
+                                      resultRequestUploadIqProtocolEntity.getResumeOffset(),
+                                      successFn, self.onUploadError, self.onUploadProgress, async=False)
+            mediaUploader.start()
+
+    def onRequestUploadError(self, jid, path, errorRequestUploadIqProtocolEntity, requestUploadIqProtocolEntity):
+        logger.error("Request upload for file %s for %s failed" % (path, jid))
+
+    def onUploadProgress(self, filePath, jid, url, progress):
+        sys.stdout.write("%s => %s, %d%% \r" % (os.path.basename(filePath), jid, progress))
+        sys.stdout.flush()

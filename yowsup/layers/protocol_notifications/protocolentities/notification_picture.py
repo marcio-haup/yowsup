@@ -11,6 +11,12 @@ class PictureNotificationProtocolEntity(NotificationProtocolEntity):
         super(PictureNotificationProtocolEntity, self).__init__("picture", _id, _from, timestamp, notify, offline)
         self.setData(setJid, setId)
 
+    def getNotify(self):
+        return self.notify
+
+    def getParticipant(self, full = True):
+        return self._participant if full else self._participant.split('@')[0]
+
     @staticmethod
     def fromProtocolTreeNode(node):
         entity = NotificationProtocolEntity.fromProtocolTreeNode(node)
