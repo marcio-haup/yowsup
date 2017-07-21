@@ -7,6 +7,7 @@ import logging
 import os.path
 import requests
 import json
+import base64
 from pprint import pprint
 from yowsup.layers.protocol_groups.protocolentities      import *
 from yowsup.layers.protocol_presence.protocolentities    import *
@@ -80,18 +81,24 @@ class EchoLayer(YowInterfaceLayer):
         # just print info
         # print("Echoing %s to %s" % (messageProtocolEntity.getBody(), messageProtocolEntity.getFrom(False)))
         url = "http://localhost/robert/index.php"
-        params = dict(
-            acao='mensagem',
-            participante=messageProtocolEntity.getParticipant(),
-            autor=messageProtocolEntity.getAuthor(),
-            alvo=messageProtocolEntity.getFrom(),
-            mensagemDeGrupo=messageProtocolEntity.isGroupMessage(),
-            mensagem=messageProtocolEntity.getBody(),
-        )
-        resp = requests.get(url=url, params=params)
-        data = json.loads(resp.text)
+        params = {
+            'acao':'mensagem',
+            'participante':messageProtocolEntity.getParticipant(),
+            'autor':messageProtocolEntity.getAuthor(),
+            'alvo':messageProtocolEntity.getFrom(),
+            'mensagemDeGrupo':messageProtocolEntity.isGroupMessage(),
+            'mensagem':messageProtocolEntity.getBody(),
+#            novo=base64.b64encode(messageProtocolEntity.getBody().encode('utf-8'))
+        }
+#        resp = requests.get(url=url, params=params)
+        resp = requests.post(url, data=params)
 
-        self.processaRetornoRobert(data)
+	try:
+            data = json.loads(resp.text)
+            self.processaRetornoRobert(data)
+	except ValueError, e:
+	    data = ''
+
 
     def onMediaMessage(self, messageProtocolEntity):
         # just print info
